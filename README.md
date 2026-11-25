@@ -38,12 +38,17 @@ When connected, `http://localhost:35001` (with the forward open) shows the statu
 ## Behaviour
 
 - **Routing:** a pushed `redirect-gateway` is ignored by default, so only the subnets work pushes go through the VPN, and Tailscale and LAN are untouched. Set `AWS_VPN_ALLOW_FULL_TUNNEL=yes` to send all traffic through work.
-- **DNS:** work DNS answers only for `AWS_VPN_DNS_DOMAINS` and any pushed domains.
+- **DNS:** work DNS answers only for `AWS_VPN_DNS_DOMAINS` and any pushed domains. Often none are needed: internal ALBs and Atlas PrivateLink hostnames usually resolve to private IPs in public DNS already, and the pushed routes carry them.
+- **Sign-in again** after: the endpoint's max session duration (AWS default 24h; IT can set 8/10/12/24h), a server reboot or service restart, or more than 20s without contact with the server (`ping-restart 20`). SAML assertions are single-use, so there is no silent reconnect.
 - **Security:** the `:35001` endpoint is loopback only. It rejects a SAML POST unless a login is pending, and rejects a cross-origin disconnect.
 
 ## Test
 
 `tests/e2e.sh` runs the controller against a stub openvpn. It needs no root and no network.
+
+## Licence
+
+The scripts are MIT. `openvpn/*.patch` modifies OpenVPN and is GPL-2.0, like OpenVPN itself. The protocol work comes from [samm-git/aws-vpn-client](https://github.com/samm-git/aws-vpn-client) (MIT).
 
 ## Upgrading openvpn
 
