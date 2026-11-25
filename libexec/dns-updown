@@ -1,0 +1,46 @@
+#!/bin/bash
+# OpenVPN --dns-updown hook: split DNS via systemd-resolved.
+#
+# Work DNS servers only answer for work domains; the tunnel link never becomes
+# a default DNS route, so Tailscale MagicDNS and home DNS keep working.
+# Domains: AWS_VPN_DNS_DOMAINS (config) plus any pushed search/resolve domains.
+#
+# Env reference: openvpn distro/dns-scripts/systemd-dns-updown.sh
+set -u
+[ -z "${dns_vars_file:-}" ] || . "${dns_vars_file}"
+
+if [ "${script_type}" != "dns-up" ]; then
+    resolvectl revert "$dev"
+    exit 0
+fi
+
+addrs=""
+i=1
+while v="dns_server_1_address_${i}"; [ -n "${!v:-}" ]; do
+    p="dns_server_1_port_${i}"
+    if [ -n "${!p:-}" ] && [ "${!p}" != 53 ]; then
+        [[ "${!v}" == *:* ]] && addrs+="[${!v}]:${!p} " || addrs+="${!v}:${!p} "
+    else
+        addrs+="${!v} "
+    fi
+    i=$((i + 1))
+done
+
+domains=""
+for d in ${AWS_VPN_DNS_DOMAINS:-}; do domains+="~${d#\~} "; done
+for v in ${!dns_search_domain_*} ${!dns_server_1_resolve_domain_*}; do
+    [[ " $domains " == *" ~${!v} "* ]] || domains+="~${!v} "
+done
+
+if [ -z "$addrs" ]; then
+    echo "dns-updown: no DNS servers pushed; leaving DNS alone"
+    exit 0
+fi
+if [ -z "$domains" ]; then
+    echo "dns-updown: WARNING no work domains known; set AWS_VPN_DNS_DOMAINS in /etc/aws-vpn-sso/config.env. Work DNS is configured on $dev but unused."
+fi
+
+echo "dns-updown: $dev servers=[$addrs] domains=[$domains]"
+resolvectl dns "$dev" $addrs
+resolvectl default-route "$dev" false
+[ -z "$domains" ] || resolvectl domain "$dev" $domains

@@ -1,0 +1,24 @@
+[Unit]
+Description=AWS Client VPN (SAML) controller on 127.0.0.1:35001
+Wants=network-online.target
+After=network-online.target systemd-resolved.service
+
+[Service]
+Type=simple
+EnvironmentFile=-/etc/aws-vpn-sso/config.env
+ExecStart=/usr/local/bin/aws-vpn-sso
+RuntimeDirectory=aws-vpn-sso
+RuntimeDirectoryMode=0700
+Restart=on-failure
+RestartSec=5s
+# Root is needed for tun + routes + resolvectl. Trim what we can.
+ProtectHome=yes
+ProtectSystem=strict
+ReadWritePaths=/run/aws-vpn-sso
+PrivateTmp=yes
+NoNewPrivileges=yes
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW
+DeviceAllow=/dev/net/tun rw
+
+[Install]
+WantedBy=multi-user.target
