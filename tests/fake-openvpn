@@ -9,4 +9,6 @@ if [ "$pass" = "ACS::35001" ]; then
 fi
 case "$pass" in CRV1::instance-1/1234/abcd-sid::FAKE-SAML*) ;; *) echo "AUTH_FAILED bad pass: $pass"; exit 1;; esac
 echo "2026-11-25 08:00:01 Initialization Sequence Completed"
-trap 'echo "SIGTERM"; exit 0' TERM; while :; do sleep 0.2; done
+trap 'echo "SIGTERM"; exit 0' TERM
+[ -e "$(dirname "$auth")/halt" ] && { sleep 1; echo "SIGTERM[soft,server-pushed-halt] received, process exiting"; exit 0; }
+while :; do sleep 0.2; done

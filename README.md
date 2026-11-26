@@ -39,7 +39,7 @@ When connected, `http://localhost:35001` (with the forward open) shows the statu
 
 - **Routing:** a pushed `redirect-gateway` is ignored by default, so only the subnets work pushes go through the VPN, and Tailscale and LAN are untouched. Set `AWS_VPN_ALLOW_FULL_TUNNEL=yes` to send all traffic through work.
 - **DNS:** work DNS answers only for `AWS_VPN_DNS_DOMAINS` and any pushed domains. Often none are needed: internal ALBs and Atlas PrivateLink hostnames usually resolve to private IPs in public DNS already, and the pushed routes carry them.
-- **Sign-in again** after: the endpoint's max session duration (AWS default 24h; IT can set 8/10/12/24h), a server reboot or service restart, or more than 20s without contact with the server (`ping-restart 20`). SAML assertions are single-use, so there is no silent reconnect.
+- **Sign-in again** after: the endpoint's max session duration (24h on ours: the server halts the tunnel and the page returns to idle), a server reboot or service restart, or more than 20s without contact with the server (`ping-restart 20`). SAML assertions are single-use, so there is no silent reconnect.
 - **Security:** the `:35001` endpoint is loopback only. It rejects a SAML POST unless a login is pending, and rejects a cross-origin disconnect.
 
 ## Test

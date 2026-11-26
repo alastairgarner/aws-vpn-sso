@@ -30,7 +30,7 @@ import threading
 import time
 from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, urlsplit
 
 PROFILE = os.environ.get("AWS_VPN_PROFILE", "/etc/aws-vpn-sso/profile.ovpn")
 OPENVPN = os.environ.get("AWS_VPN_OPENVPN", "/usr/local/libexec/aws-vpn-sso/openvpn-aws")
@@ -38,7 +38,7 @@ DNS_UPDOWN = os.environ.get("AWS_VPN_DNS_UPDOWN", "/usr/local/libexec/aws-vpn-ss
 RUNTIME_DIR = os.environ.get("RUNTIME_DIRECTORY", "/run/aws-vpn-sso")
 DNS_DOMAINS = os.environ.get("AWS_VPN_DNS_DOMAINS", "").split()
 ALLOW_FULL_TUNNEL = os.environ.get("AWS_VPN_ALLOW_FULL_TUNNEL", "no") == "yes"
-LISTEN = ("127.0.0.1", 35001)
+LISTEN = ("127.0.0.1", int(os.environ.get("AWS_VPN_LISTEN_PORT", "35001")))  # IdP ACS is fixed at 35001; override for tests
 PHASE1_TIMEOUT = 30
 SAML_TIMEOUT = 300  # how long a phase-1 session waits for the browser
 CONNECT_TIMEOUT = 60
@@ -211,11 +211,14 @@ class VPN:
         threading.Thread(target=self._connect_deadline, args=(proc,), daemon=True).start()
 
     def _watch(self, proc, auth):
+        ended = None
         for line in proc.stdout:
             line = line.rstrip()
             self.logs.append(line)
             log(f"openvpn: {line}")
-            if "Initialization Sequence Completed" in line:
+            if "server-pushed-halt" in line:
+                ended = "session ended by server (max session duration); sign in again"
+            elif "Initialization Sequence Completed" in line:
                 with self.lock:
                     if self.proc is proc:
                         self.set("connected")
@@ -235,9 +238,12 @@ class VPN:
         with self.lock:
             if self.proc is proc:
                 self.proc = None
-                if self.state != "failed":
-                    self.set("idle" if self.state == "disconnecting" else "failed",
-                             "" if self.state == "disconnecting" else f"openvpn exited ({rc})")
+                if self.state == "disconnecting":
+                    self.set("idle")
+                elif ended:
+                    self.set("idle", ended)
+                elif self.state != "failed":
+                    self.set("failed", f"openvpn exited ({rc})")
 
     def _connect_deadline(self, proc):
         time.sleep(CONNECT_TIMEOUT)
@@ -317,13 +323,12 @@ class Handler(BaseHTTPRequestHandler):
         return origin in (None, "null", "http://localhost:35001", "http://127.0.0.1:35001")
 
     def do_GET(self):
-        if self.path == "/status":
+        path = urlsplit(self.path).path  # forms add "?"; ignore query strings
+        if path == "/status":
             return self._send(200, json.dumps(vpn.snapshot()), "application/json")
-        if self.path in ("/", "/connect"):
-            # "/" auto-starts login when idle; "/connect" also retries after failure.
-            startable = ("idle", "awaiting_saml", "failed") if self.path == "/connect" \
-                else ("idle", "awaiting_saml")
-            if vpn.state not in startable:
+        if path in ("/", "/connect"):
+            # Not connected (or connecting): start/resume sign-in.
+            if vpn.state not in ("idle", "awaiting_saml", "failed"):
                 return self._page()
             try:
                 url = vpn.begin_login()
@@ -337,7 +342,8 @@ class Handler(BaseHTTPRequestHandler):
         if length > 1 << 20:
             return self._send(413, "too large", "text/plain")
         body = self.rfile.read(length).decode()
-        if self.path == "/":
+        path = urlsplit(self.path).path
+        if path == "/":
             saml = parse_qs(body).get("SAMLResponse", [""])[0]
             if not saml:
                 return self._send(400, "missing SAMLResponse", "text/plain")
@@ -346,7 +352,7 @@ class Handler(BaseHTTPRequestHandler):
             except Exception:
                 return self._page(409)
             return self._send(303, "", headers=[("Location", "/")])
-        if self.path == "/disconnect":
+        if path == "/disconnect":
             if not self._same_origin():
                 return self._send(403, "bad origin", "text/plain")
             vpn.disconnect()
